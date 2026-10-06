@@ -32,7 +32,7 @@ struct Intent {
     uint256 triggerPrice;      // 1e6
     bool    triggerAbove;      // true: fill when mid >= triggerPrice
     uint256 referencePrice;    // 1e6, anchor for the deviation bound
-    uint256 maxDeviationBps;   // bound: |fillPx - ref| * 10000 <= maxDeviationBps * ref
+    uint256 maxDeviationBps;   // bound: entryPrice <= ref * (1 + maxDev) if long, else >= ref * (1 - maxDev)
     uint64  expiry;            // unix seconds
     uint256 solverFeeBps;      // e.g. 50
     uint256 nonce;
@@ -56,7 +56,9 @@ Functions:
   - `USDC.safeTransferFrom(i.user, address(this), i.deposit)`.
 - `cancelIntent(bytes32 id)` — `msg.sender == intent.user`, status OPEN → CANCELLED, refund deposit.
 - `fillIntent(bytes32 id, uint256 entryPrice)` — `msg.sender == solver` (immutable operator set at deploy; MVP), status OPEN, `block.timestamp < expiry`.
-  - **Bound enforced on-chain:** `abs(int(entryPrice) - int(ref)) * 10000 <= maxDeviationBps * ref`, else revert.
+  - **Bound enforced on-chain:**
+    - If `isLong`: `require(entryPrice <= ref + (ref * maxDeviationBps / 10000))`
+    - If `!isLong`: `require(entryPrice >= ref - (ref * maxDeviationBps / 10000))`
   - Store entryPrice, status FILLED.
 - `settleIntent(bytes32 id, uint256 exitPrice)` — solver only, status FILLED.
   - `pnl = int(sizeUsd) * (int(exitPrice) - int(entryPrice)) / int(entryPrice)`, negated if short. (Solidity: careful with signed division order — multiply before divide.)
@@ -78,7 +80,7 @@ Env: `BASE_RPC_URL`, `OPERATOR_KEY`, `ESCROW_ADDRESS`, `USDC_ADDRESS`,
   - Verified live markets on testnet: 70 `xyz:*` markets (incl. `xyz:GOLD`, `xyz:CL`, `xyz:NVDA`); mainnet `xyz:CL` book is liquid (use mainnet feed for triggers, testnet for execution).
 - `triggers.ts` — each poll, for each OPEN intent: `fired = triggerAbove ? mid >= triggerPrice : mid <= triggerPrice`. On fire: bound-check against `referencePrice`/`maxDeviationBps` using the *observed mid*; if violated, log `BOUND_EXCEEDED` and mark intent skipped (do not retry).
 - `executor.ts` — Hyperliquid **testnet** `POST https://api.hyperliquid-testnet.xyz/exchange`:
-  - Action: `{"type":"order","orders":[{"a":<assetId>,"b":<isBuy>,"p":<px>,"s":<sz>,"r":false,"t":{"limit":{"tif":"Gtc"}}}],"grouping":"na"}` with EIP-712 signature per Hyperliquid's signing spec (use their documented action hashing; test against testnet).
+  - Action: `{"type":"order","orders":[{"a":<assetId>,"b":<isBuy>,"p":<px>,"s":<sz>,"r":false,"t":{"limit":{"tif":"Ioc"}}}],"grouping":"na"}` with EIP-712 signature per Hyperliquid's signing spec (use their documented action hashing; test against testnet). Note: IOC ensures no lingering orders. For the demo, solver should verify book depth is sufficient for full fill before firing.
   - **Resolve `<assetId>` at runtime** from `POST {testnet}/info {"type":"meta","dex":"xyz"}` universe ordering — do not hardcode (HIP-3 ids follow `100000 + dex_index*10000 + market_index`; confirm dex_index from the response).
   - Size `s` is in base-asset units respecting `szDecimals` from meta. For the demo the solver quotes both sides on thin books (testnet `xyz:CL` book is empty; `xyz:GOLD` has a small book) — i.e., the solver acts as market maker + taker. Disclose in README.
   - Return actual fill price → call `fillIntent(id, entryPrice)` on Base.
