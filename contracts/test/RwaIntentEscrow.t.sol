@@ -96,4 +96,159 @@ contract RwaIntentEscrowTest is Test {
         assertEq(usdc.balanceOf(user), 10000e6 - 600e6 + 602500000); // 10002.5 USDC
         assertEq(usdc.balanceOf(solver), 10000e6 - 2500000); // Solver pays 2.5 net (5 PnL - 2.5 fee)
     }
+
+    function test_BoundReverts() public {
+        RwaIntentEscrow.Intent memory intent = RwaIntentEscrow.Intent({
+            user: user,
+            market: "xyz:GOLD",
+            isLong: true,
+            sizeUsd: 500e6,
+            deposit: 600e6,
+            triggerPrice: 2000e6,
+            triggerAbove: true,
+            referencePrice: 2000e6,
+            maxDeviationBps: 500, // 5% => [1900, 2100]
+            expiry: uint64(block.timestamp + 1 days),
+            solverFeeBps: 50,
+            nonce: 2
+        });
+        bytes memory sig = signIntent(intent);
+        vm.prank(user);
+        escrow.createIntent(intent, sig);
+        bytes32 id = keccak256(abi.encode(intent));
+
+        // 10% above ref: exceeds the 5% bound
+        vm.prank(solver);
+        vm.expectRevert("Exceeds max deviation");
+        escrow.fillIntent(id, 2200e6);
+
+        // 10% below ref: also exceeds (symmetric bound)
+        vm.prank(solver);
+        vm.expectRevert("Exceeds max deviation");
+        escrow.fillIntent(id, 1800e6);
+
+        // Exactly at the edge: passes
+        vm.prank(solver);
+        escrow.fillIntent(id, 2100e6);
+        assertEq(uint(escrow.intentStatuses(id)), uint(RwaIntentEscrow.Status.FILLED));
+    }
+
+    function test_CancelRefunds() public {
+        RwaIntentEscrow.Intent memory intent = RwaIntentEscrow.Intent({
+            user: user,
+            market: "xyz:CL",
+            isLong: false,
+            sizeUsd: 500e6,
+            deposit: 600e6,
+            triggerPrice: 60e6,
+            triggerAbove: false,
+            referencePrice: 65e6,
+            maxDeviationBps: 500,
+            expiry: uint64(block.timestamp + 1 days),
+            solverFeeBps: 50,
+            nonce: 3
+        });
+        bytes memory sig = signIntent(intent);
+        vm.prank(user);
+        escrow.createIntent(intent, sig);
+        bytes32 id = keccak256(abi.encode(intent));
+
+        uint256 userBefore = usdc.balanceOf(user);
+        vm.prank(user);
+        escrow.cancelIntent(id);
+
+        assertEq(uint(escrow.intentStatuses(id)), uint(RwaIntentEscrow.Status.CANCELLED));
+        assertEq(usdc.balanceOf(user), userBefore + 600e6, "full deposit refunded");
+    }
+
+    function test_ExpireUnfilledRefunds() public {
+        RwaIntentEscrow.Intent memory intent = RwaIntentEscrow.Intent({
+            user: user,
+            market: "xyz:NVDA",
+            isLong: true,
+            sizeUsd: 500e6,
+            deposit: 600e6,
+            triggerPrice: 200e6,
+            triggerAbove: true,
+            referencePrice: 190e6,
+            maxDeviationBps: 500,
+            expiry: uint64(block.timestamp + 1 hours),
+            solverFeeBps: 50,
+            nonce: 4
+        });
+        bytes memory sig = signIntent(intent);
+        vm.prank(user);
+        escrow.createIntent(intent, sig);
+        bytes32 id = keccak256(abi.encode(intent));
+
+        // Not yet expired: reverts
+        vm.expectRevert("Not expired");
+        escrow.expireUnfilled(id);
+
+        vm.warp(block.timestamp + 2 hours);
+        uint256 userBefore = usdc.balanceOf(user);
+        // Anyone can trigger the refund
+        vm.prank(solver);
+        escrow.expireUnfilled(id);
+
+        assertEq(uint(escrow.intentStatuses(id)), uint(RwaIntentEscrow.Status.EXPIRED));
+        assertEq(usdc.balanceOf(user), userBefore + 600e6, "full deposit refunded");
+    }
+
+    function test_ReplayProtection() public {
+        RwaIntentEscrow.Intent memory intent = RwaIntentEscrow.Intent({
+            user: user,
+            market: "xyz:GOLD",
+            isLong: true,
+            sizeUsd: 500e6,
+            deposit: 600e6,
+            triggerPrice: 2000e6,
+            triggerAbove: true,
+            referencePrice: 1950e6,
+            maxDeviationBps: 500,
+            expiry: uint64(block.timestamp + 1 days),
+            solverFeeBps: 50,
+            nonce: 5
+        });
+        bytes memory sig = signIntent(intent);
+        vm.prank(user);
+        escrow.createIntent(intent, sig);
+
+        // Same intent (same nonce) again: reverts
+        vm.prank(user);
+        vm.expectRevert("Intent already exists");
+        escrow.createIntent(intent, sig);
+    }
+
+    function test_ShortPosition_Loss() public {
+        RwaIntentEscrow.Intent memory intent = RwaIntentEscrow.Intent({
+            user: user,
+            market: "xyz:CL",
+            isLong: false,
+            sizeUsd: 500e6,
+            deposit: 600e6,
+            triggerPrice: 60e6,
+            triggerAbove: false,
+            referencePrice: 65e6,
+            maxDeviationBps: 1000, // 10% => [58.5, 71.5]
+            expiry: uint64(block.timestamp + 1 days),
+            solverFeeBps: 50, // 2.5e6
+            nonce: 6
+        });
+        bytes memory sig = signIntent(intent);
+        vm.prank(user);
+        escrow.createIntent(intent, sig);
+        bytes32 id = keccak256(abi.encode(intent));
+
+        vm.prank(solver);
+        escrow.fillIntent(id, 60e6);
+
+        // Price rises 10% against the short: PnL = 500 * (60-66)/60 = -50
+        // Payout = 600 - 50 - 2.5 = 547.5; solver keeps 52.5
+        vm.prank(solver);
+        escrow.settleIntent(id, 66e6);
+
+        assertEq(usdc.balanceOf(user), 10000e6 - 600e6 + 547500000);
+        assertEq(usdc.balanceOf(solver), 10000e6 + 52500000);
+    }
 }
