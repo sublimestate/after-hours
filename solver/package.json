@@ -4,15 +4,17 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "tsx --test test/*.test.ts",
     "simulate": "tsx src/simulate.ts",
-    "start": "tsx src/index.ts"
+    "start": "tsx src/index.ts",
+    "seed:book": "tsx src/seedBook.ts"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
     "dotenv": "^18.0.5",
+    "ethers": "^6.17.0",
     "hyperliquid": "^1.7.7",
     "viem": "^2.57.3"
   },
@@ -20,5 +22,6 @@
     "@types/node": "^26.6.4",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2"
-  }
+  },
+  "type": "module"
 }

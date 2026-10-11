@@ -251,4 +251,47 @@ contract RwaIntentEscrowTest is Test {
         assertEq(usdc.balanceOf(user), 10000e6 - 600e6 + 547500000);
         assertEq(usdc.balanceOf(solver), 10000e6 + 52500000);
     }
+
+    /// @notice Fuzz: the symmetric bound invariant holds for all inputs.
+    /// If |entryPrice - ref| * 10000 > maxDeviationBps * ref, fillIntent MUST revert.
+    /// If within bounds, fillIntent MUST succeed (all else valid).
+    function testFuzz_BoundInvariant(uint256 ref, uint256 entryPrice, uint256 devBps) public {
+        // Bound inputs to sane ranges: ref in [$1, $1M], dev in (0, 100%]
+        ref = bound(ref, 1e6, 1e12);
+        devBps = bound(devBps, 1, 10000);
+        // entryPrice in [0, 2x ref] to cover both sides
+        entryPrice = bound(entryPrice, 0, ref * 2);
+
+        uint256 nonce = uint256(keccak256(abi.encode(ref, entryPrice, devBps)));
+        RwaIntentEscrow.Intent memory intent = RwaIntentEscrow.Intent({
+            user: user,
+            market: "xyz:GOLD",
+            isLong: true,
+            sizeUsd: 500e6,
+            deposit: 600e6,
+            triggerPrice: ref,
+            triggerAbove: true,
+            referencePrice: ref,
+            maxDeviationBps: devBps,
+            expiry: uint64(block.timestamp + 1 days),
+            solverFeeBps: 50,
+            nonce: nonce
+        });
+        bytes memory sig = signIntent(intent);
+        vm.prank(user);
+        escrow.createIntent(intent, sig);
+        bytes32 id = keccak256(abi.encode(intent));
+
+        uint256 diff = entryPrice > ref ? entryPrice - ref : ref - entryPrice;
+        bool withinBound = diff * 10000 <= devBps * ref;
+
+        vm.prank(solver);
+        if (withinBound) {
+            escrow.fillIntent(id, entryPrice);
+            assertEq(uint(escrow.intentStatuses(id)), uint(RwaIntentEscrow.Status.FILLED));
+        } else {
+            vm.expectRevert("Exceeds max deviation");
+            escrow.fillIntent(id, entryPrice);
+        }
+    }
 }

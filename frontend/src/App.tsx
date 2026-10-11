@@ -2,10 +2,9 @@ import { useState, useEffect } from 'react'
 import { useAccount, useConnect, useDisconnect, useWriteContract, useSignTypedData } from 'wagmi'
 import { injected } from 'wagmi/connectors'
 import { parseUnits } from 'viem'
+import { IntentsList } from './components/IntentsList'
+import { ESCROW_ADDRESS, USDC_ADDRESS } from './escrow'
 import './App.css'
-
-const ESCROW_ADDRESS = "0x0000000000000000000000000000000000000000" // Replace with deployed Base Sepolia address
-const USDC_ADDRESS = "0x0000000000000000000000000000000000000000" // Replace with testnet USDC
 
 const DOMAIN = {
   name: "AfterHours",
@@ -47,6 +46,7 @@ function App() {
   const [referencePrice, setReferencePrice] = useState("")
   const [maxDeviationBps, setMaxDeviationBps] = useState("500") // 5%
   const [expiryHours, setExpiryHours] = useState("24")
+  const [tab, setTab] = useState<"create" | "intents">("create")
   const solverFeeBps = 50n // 0.5% default
 
   // Fetch Live Mid Price
@@ -154,6 +154,25 @@ function App() {
         </section>
 
         {isConnected && (
+          <div className="tabs">
+            <button
+              className={`tab ${tab === "create" ? "active" : ""}`}
+              onClick={() => setTab("create")}
+            >
+              Create Intent
+            </button>
+            <button
+              className={`tab ${tab === "intents" ? "active" : ""}`}
+              onClick={() => setTab("intents")}
+            >
+              My Intents
+            </button>
+          </div>
+        )}
+
+        {isConnected && tab === "intents" && <IntentsList userAddress={address} />}
+
+        {isConnected && tab === "create" && (
           <form className="intent-form card" onSubmit={handleSubmit}>
             <h3>Create Intent</h3>
             
@@ -227,8 +246,11 @@ function App() {
                 <span>${(Number(sizeUsd) + Number(sizeUsd) * 0.005).toFixed(2)}</span>
               </div>
               <div className="summary-row bound">
-                <span>Worst Acceptable Fill:</span>
-                <span>${(Number(referencePrice) * (1 + (isLong ? 1 : -1) * (Number(maxDeviationBps)/10000))).toFixed(4)}</span>
+                <span>Fill bound (±{(Number(maxDeviationBps) / 100).toFixed(1)}%):</span>
+                <span>
+                  ${(Number(referencePrice) * (1 - Number(maxDeviationBps) / 10000)).toFixed(4)} – $
+                  {(Number(referencePrice) * (1 + Number(maxDeviationBps) / 10000)).toFixed(4)}
+                </span>
               </div>
             </div>
 

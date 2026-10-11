@@ -1,6 +1,6 @@
 import { walletClient, publicClient, escrowContract, ESCROW_ADDRESS, account } from "./chain";
 import { fetchL2BookMid } from "./hlfeed";
-import { Intent } from "./types";
+import type { Intent } from "./types";
 import { keccak256, encodePacked, encodeAbiParameters, parseAbiParameters, pad } from "viem";
 
 async function simulate() {
