@@ -1,5 +1,5 @@
 import { walletClient, escrowContract, ESCROW_ADDRESS } from "./chain";
-import { Intent } from "./types";
+import type { Intent } from "./types";
 
 /**
  * Submits the fill transaction to the Base Sepolia escrow contract.
@@ -10,7 +10,7 @@ export async function submitFillOnChain(intent: Intent, entryPrice1e6: bigint) {
     console.log(`[settler] Submitting fill for ${intent.id} at ${entryPrice1e6}`);
     
     try {
-        const hash = await escrowContract.write.fillIntent([
+        const hash = await escrowContract.write.fillIntent!([
             intent.id as `0x${string}`,
             entryPrice1e6
         ]);
@@ -32,7 +32,7 @@ export async function submitSettleOnChain(intentId: string, exitPrice1e6: bigint
     console.log(`[settler] Submitting settle for ${intentId} at ${exitPrice1e6}`);
     
     try {
-        const hash = await escrowContract.write.settleIntent([
+        const hash = await escrowContract.write.settleIntent!([
             intentId as `0x${string}`,
             exitPrice1e6
         ]);

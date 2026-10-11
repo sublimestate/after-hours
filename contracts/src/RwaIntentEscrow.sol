@@ -110,11 +110,11 @@ contract RwaIntentEscrow is EIP712 {
         require(block.timestamp < i.expiry, "Expired");
 
         uint256 ref = i.referencePrice;
-        if (i.isLong) {
-            require(entryPrice <= ref + (ref * i.maxDeviationBps / 10000), "Exceeds max deviation");
-        } else {
-            require(entryPrice >= ref - (ref * i.maxDeviationBps / 10000), "Exceeds max deviation");
-        }
+        // Symmetric bound per spec: |entryPrice - ref| * 10000 <= maxDeviationBps * ref.
+        // Guards both directions — an adverse fill hurts the user either way, and an
+        // unbounded favorable fill can brick settlement via PnL explosion.
+        uint256 diff = entryPrice > ref ? entryPrice - ref : ref - entryPrice;
+        require(diff * 10000 <= i.maxDeviationBps * ref, "Exceeds max deviation");
 
         entryPrices[id] = entryPrice;
         intentStatuses[id] = Status.FILLED;

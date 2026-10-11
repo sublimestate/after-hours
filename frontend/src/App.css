@@ -229,3 +229,42 @@ input:user-invalid {
     gap: 1rem;
   }
 }
+
+/* Tabs */
+.tabs { display: flex; gap: 8px; margin: 20px 0; }
+.tab { padding: 10px 20px; border-radius: 8px; border: 1px solid #ddd; background: #f5f5f5; cursor: pointer; font-size: 15px; }
+.tab.active { background: #1a1a1a; color: #fff; border-color: #1a1a1a; }
+
+/* Intent cards */
+.intents-list { display: flex; flex-direction: column; gap: 12px; }
+.intent-card { padding: 0; overflow: hidden; }
+.intent-header { display: flex; justify-content: space-between; align-items: center; padding: 16px 20px; cursor: pointer; }
+.intent-header:hover { background: #fafafa; }
+.intent-meta { display: flex; gap: 12px; align-items: center; }
+.long { color: #16a34a; font-weight: 600; }
+.short { color: #dc2626; font-weight: 600; }
+.status { padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: 600; }
+.status-open { background: #dbeafe; color: #1d4ed8; }
+.status-filled { background: #fef3c7; color: #b45309; }
+.status-settled { background: #d1fae5; color: #047857; }
+.status-cancelled, .status-expired { background: #f3f4f6; color: #6b7280; }
+.expand-hint { color: #9ca3af; }
+.intent-detail { padding: 0 20px 20px; border-top: 1px solid #eee; }
+.intent-detail h4 { margin: 16px 0 8px; }
+.detail-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 12px; }
+.detail-grid span { display: block; font-size: 12px; color: #6b7280; }
+.detail-grid strong { font-size: 14px; }
+
+/* Verify panel */
+.verify-panel { display: flex; flex-direction: column; gap: 12px; }
+.verify-record { border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px; }
+.verify-row { display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 14px; }
+.verify-event { font-weight: 700; background: #f3f4f6; padding: 2px 8px; border-radius: 4px; }
+.verify-ok { color: #047857; font-weight: 600; }
+.verify-warn { color: #b45309; font-weight: 600; }
+.verify-book { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 10px 0; font-size: 12px; }
+.book-title { font-weight: 600; margin-bottom: 4px; }
+.book-level { display: flex; justify-content: space-between; padding: 2px 0; border-bottom: 1px solid #f3f4f6; }
+.verify-link { font-size: 13px; color: #2563eb; }
+.verify-ts { font-size: 12px; color: #9ca3af; margin-top: 6px; }
+.verify-empty, .verify-loading { font-size: 14px; color: #6b7280; padding: 12px; background: #f9fafb; border-radius: 8px; }

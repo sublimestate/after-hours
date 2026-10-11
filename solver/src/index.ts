@@ -2,51 +2,56 @@ import { fetchL2BookMid } from "./hlfeed";
 import { evaluateTrigger, TriggerResult } from "./triggers";
 import { executeOrder } from "./executor";
 import { submitFillOnChain } from "./settler";
-import { Intent } from "./types";
+import { recordEvent } from "./verify";
+import { fetchOpenIntents, publicClient, escrowContract, ESCROW_ADDRESS, escrowAbi } from "./chain";
+import type { Intent } from "./types";
 import dotenv from "dotenv";
 
 dotenv.config();
 
-// MOCK In-memory store for intents
-// In a real implementation, you'd fetch OPEN intents from `chain.ts` on boot,
-// and listen to `IntentCreated` events.
-const openIntents: Intent[] = [];
+const openIntents = new Map<string, Intent>();
 const POLL_MS = parseInt(process.env.POLL_MS || "5000");
 
-async function pollMarkets() {
-    console.log(`[bot] Polling ${openIntents.length} open intents...`);
+function toIntent(id: string, c: {
+    user: string; market: string; isLong: boolean; sizeUsd: bigint; deposit: bigint;
+    triggerPrice: bigint; triggerAbove: boolean; referencePrice: bigint;
+    maxDeviationBps: bigint; expiry: number; solverFeeBps: bigint; nonce: bigint;
+}): Intent {
+    return { id, ...c };
+}
 
-    // Group intents by market to minimize API calls
-    const marketsToPoll = [...new Set(openIntents.map(i => i.market))];
+async function pollMarkets() {
+    console.log(`[bot] Polling ${openIntents.size} open intents...`);
+
+    const marketsToPoll = [...new Set([...openIntents.values()].map(i => i.market))];
 
     for (const market of marketsToPoll) {
         const bookSnapshot = await fetchL2BookMid(market);
         if (!bookSnapshot) continue;
 
-        const intentsForMarket = openIntents.filter(i => i.market === market);
+        for (const intent of [...openIntents.values()].filter(i => i.market === market)) {
+            // Skip expired intents (anyone can call expireUnfilled; the bot doesn't need to)
+            if (Date.now() / 1000 >= intent.expiry) {
+                openIntents.delete(intent.id);
+                continue;
+            }
 
-        for (const intent of intentsForMarket) {
             const result = evaluateTrigger(intent, bookSnapshot);
-            
+
             if (result === TriggerResult.READY_TO_FILL) {
                 console.log(`[bot] Trigger READY for ${intent.id}. Executing...`);
-                
-                // 1. Execute on Hyperliquid Testnet
+
                 const fillPrice = await executeOrder(intent, bookSnapshot.midPrice1e6);
-                
+
                 if (fillPrice) {
-                    // 2. Submit fill to Base Sepolia Escrow
+                    // Record the fill for the verify panel before submitting on-chain
+                    recordEvent(intent.id, "FILL", fillPrice, bookSnapshot);
                     await submitFillOnChain(intent, fillPrice);
-                    
-                    // Remove from open list
-                    const idx = openIntents.indexOf(intent);
-                    if (idx > -1) openIntents.splice(idx, 1);
+                    openIntents.delete(intent.id);
                 }
             } else if (result === TriggerResult.BOUND_EXCEEDED) {
-                // If it exceeded bounds, we drop it to avoid wasting gas on reverts
-                console.log(`[bot] Dropping intent ${intent.id} due to bound violation.`);
-                const idx = openIntents.indexOf(intent);
-                if (idx > -1) openIntents.splice(idx, 1);
+                console.log(`[bot] Intent ${intent.id} exceeded bounds; dropping (contract would revert).`);
+                openIntents.delete(intent.id);
             }
         }
     }
@@ -54,8 +59,44 @@ async function pollMarkets() {
 
 async function startBot() {
     console.log("[bot] Starting AfterHours Solver Bot...");
-    // Initial fetch of OPEN intents from contract would go here...
-    
+
+    // Boot: load all OPEN intents from chain
+    const existing = await fetchOpenIntents();
+    for (const c of existing) {
+        openIntents.set(c.id, toIntent(c.id, c));
+    }
+    console.log(`[bot] Loaded ${openIntents.size} open intents from chain.`);
+
+    // Live: subscribe to new intents
+    publicClient.watchContractEvent({
+        address: ESCROW_ADDRESS,
+        abi: escrowAbi,
+        eventName: "IntentCreated",
+        onLogs: (logs: any[]) => {
+            for (const log of logs) {
+                const id = log.args.id as string;
+                const i = log.args.intent as any;
+                if (!openIntents.has(id)) {
+                    openIntents.set(id, toIntent(id, {
+                        user: i.user,
+                        market: i.market,
+                        isLong: i.isLong,
+                        sizeUsd: i.sizeUsd,
+                        deposit: i.deposit,
+                        triggerPrice: i.triggerPrice,
+                        triggerAbove: i.triggerAbove,
+                        referencePrice: i.referencePrice,
+                        maxDeviationBps: i.maxDeviationBps,
+                        expiry: Number(i.expiry),
+                        solverFeeBps: i.solverFeeBps,
+                        nonce: i.nonce,
+                    }));
+                    console.log(`[bot] New intent ${id} (${i.market})`);
+                }
+            }
+        },
+    });
+
     setInterval(pollMarkets, POLL_MS);
 }
 
