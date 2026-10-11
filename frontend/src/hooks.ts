@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { usePublicClient } from "wagmi";
-import { ESCROW_ADDRESS, ESCROW_ABI, VerifyRecord } from "./escrow";
+import { ESCROW_ADDRESS, ESCROW_ABI, type VerifyRecord } from "./escrow";
 
 export interface UserIntent {
   id: `0x${string}`;

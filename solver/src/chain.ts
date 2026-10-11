@@ -5,7 +5,7 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-export const ESCROW_ADDRESS = (process.env.ESCROW_ADDRESS || "0x0000000000000000000000000000000000000000") as `0x${string}`;
+export const ESCROW_ADDRESS = (process.env.ESCROW_ADDRESS || "0xb5af8a8bed7272b0b9b0144d58dc86912a6f7dd4") as `0x${string}`;
 const OPERATOR_KEY = process.env.OPERATOR_KEY as `0x${string}`;
 
 export const account = OPERATOR_KEY ? privateKeyToAccount(OPERATOR_KEY) : null;

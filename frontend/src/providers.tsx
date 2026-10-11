@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createConfig, WagmiProvider, http } from 'wagmi'
 import { baseSepolia } from 'wagmi/chains'
-import { ReactNode } from 'react'
+import type { ReactNode } from 'react'
 
 const queryClient = new QueryClient()
 

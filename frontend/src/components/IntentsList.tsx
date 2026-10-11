@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { useUserIntents, useVerifyRecords, fmtUsd, fmtPx, UserIntent } from "../hooks";
-import { STATUS_LABELS, VerifyRecord } from "../escrow";
+import { useUserIntents, useVerifyRecords, fmtUsd, fmtPx, type UserIntent } from "../hooks";
+import { STATUS_LABELS, type VerifyRecord } from "../escrow";
 
 function VerifyPanel({ intentId }: { intentId: string }) {
   const { data: records, isLoading } = useVerifyRecords(intentId);

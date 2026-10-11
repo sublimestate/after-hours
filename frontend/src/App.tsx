@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useAccount, useConnect, useDisconnect, useWriteContract, useSignTypedData } from 'wagmi'
+import { useAccount, useConnect, useDisconnect, useWriteContract, useSignTypedData, usePublicClient } from 'wagmi'
 import { injected } from 'wagmi/connectors'
 import { parseUnits } from 'viem'
 import { IntentsList } from './components/IntentsList'
@@ -36,6 +36,7 @@ function App() {
   const { disconnect } = useDisconnect()
   const { signTypedDataAsync } = useSignTypedData()
   const { writeContractAsync } = useWriteContract()
+  const publicClient = usePublicClient()
 
   // Form State
   const [market, setMarket] = useState("xyz:GOLD")
@@ -47,6 +48,7 @@ function App() {
   const [maxDeviationBps, setMaxDeviationBps] = useState("500") // 5%
   const [expiryHours, setExpiryHours] = useState("24")
   const [tab, setTab] = useState<"create" | "intents">("create")
+  const [isSubmitting, setIsSubmitting] = useState(false)
   const solverFeeBps = 50n // 0.5% default
 
   // Fetch Live Mid Price
@@ -78,8 +80,9 @@ function App() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!address) return;
+    if (!address || isSubmitting) return;
 
+    setIsSubmitting(true);
     try {
       const sizeUsdBigInt = parseUnits(sizeUsd, 6);
       const fee = (sizeUsdBigInt * solverFeeBps) / 10000n;
@@ -110,13 +113,18 @@ function App() {
 
       console.log("Signature:", signature);
 
-      // 1. Approve USDC
-      await writeContractAsync({
+      // 1. Approve USDC and wait for receipt
+      const approveHash = await writeContractAsync({
         address: USDC_ADDRESS as `0x${string}`,
         abi: [{ name: 'approve', type: 'function', stateMutability: 'nonpayable', inputs: [{ name: 'spender', type: 'address' }, { name: 'amount', type: 'uint256' }], outputs: [{ name: '', type: 'bool' }] }],
         functionName: 'approve',
         args: [ESCROW_ADDRESS as `0x${string}`, deposit],
       });
+
+      if (publicClient) {
+        console.log("Waiting for USDC approval receipt...", approveHash);
+        await publicClient.waitForTransactionReceipt({ hash: approveHash });
+      }
 
       // 2. Create Intent
       await writeContractAsync({
@@ -130,6 +138,8 @@ function App() {
     } catch (err) {
       console.error(err);
       alert("Error creating intent. See console.");
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -254,8 +264,8 @@ function App() {
               </div>
             </div>
 
-            <button type="submit" className="btn-primary full-width submit-btn">
-              Sign & Deposit ${ (Number(sizeUsd) + Number(sizeUsd) * 0.005).toFixed(2) }
+            <button type="submit" className="btn-primary full-width submit-btn" disabled={isSubmitting}>
+              {isSubmitting ? "Processing..." : `Sign & Deposit $${(Number(sizeUsd) + Number(sizeUsd) * 0.005).toFixed(2)}`}
             </button>
           </form>
         )}

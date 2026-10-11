@@ -50,6 +50,12 @@ function saveRecords(records: VerifyRecord[]) {
     try {
         fs.mkdirSync(dataDir(), { recursive: true });
         fs.writeFileSync(recordsFile(), JSON.stringify(records, null, 2));
+
+        // Also mirror to frontend/public for seamless local dev & demo
+        const frontendPublic = path.join(__dirname, "..", "..", "frontend", "public");
+        if (fs.existsSync(frontendPublic)) {
+            fs.writeFileSync(path.join(frontendPublic, "verify-records.json"), JSON.stringify(records, null, 2));
+        }
     } catch (e) {
         console.error("[verify] Failed to save records:", e);
     }
