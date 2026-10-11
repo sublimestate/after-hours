@@ -1,0 +1,20 @@
+# Dependencies
+node_modules/
+
+# Env & secrets — never commit
+.env
+.env.local
+*.key
+
+# Solver runtime data
+data/
+
+# Build outputs
+dist/
+contracts/cache/
+contracts/out/
+contracts/broadcast/
+frontend/dist/
+
+# Logs
+*.log
