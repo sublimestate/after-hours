@@ -207,6 +207,135 @@ export async function executeOrder(intent: Intent, fillPx1e6: bigint): Promise<b
 }
 
 /**
+ * Closes the solver's HL position for a filled intent via a reduce-only IOC
+ * order on the opposite side. Returns the average close price in 1e6,
+ * or null if the close did not fill.
+ */
+export async function closePosition(intent: Intent): Promise<bigint | null> {
+    const metaMap = await loadAssetMeta();
+    const assetMeta = metaMap[intent.market];
+    if (!assetMeta) {
+        console.error(`[executor] Asset meta not found for ${intent.market}`);
+        return null;
+    }
+
+    const asset = await resolveAssetIndex(intent.market);
+    await ensureIsolatedLeverage(asset);
+
+    // Fetch current position size from the exchange
+    const posRes: any = await (async () => {
+        const r = await fetch(HL_EXEC_INFO, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                type: "clearinghouseState",
+                user: getWallet().address,
+            }),
+        });
+        if (!r.ok) throw new Error("Failed to fetch clearinghouseState");
+        return r.json();
+    })();
+
+    const dexPositions = (posRes?.assetPositions || []) as any[];
+    // HIP-3 positions live under the dex-specific state; fall back to top-level
+    let szi: string | null = null;
+    for (const p of dexPositions) {
+        const pos = p?.position;
+        if (pos && Number(pos?.asset) === asset) {
+            szi = pos.szi;
+            break;
+        }
+    }
+    // Fallback: query per-dex state via info endpoint with dex param
+    if (szi === null) {
+        const dex = intent.market.slice(0, intent.market.indexOf(":"));
+        const r = await fetch(HL_EXEC_INFO, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ type: "clearinghouseState", user: getWallet().address, dex }),
+        });
+        if (r.ok) {
+            const d: any = await r.json();
+            for (const p of d?.assetPositions || []) {
+                const pos = p?.position;
+                if (pos && pos.coin === intent.market) {
+                    szi = pos.szi;
+                    break;
+                }
+            }
+        }
+    }
+
+    if (!szi || parseFloat(szi) === 0) {
+        console.error(`[executor] No open position found for ${intent.market}, skipping close`);
+        return null;
+    }
+
+    const closeSz = Math.abs(parseFloat(szi)).toFixed(assetMeta.szDecimals);
+    // Opposite side of the original order, reduce-only
+    const isBuy = !intent.isLong;
+
+    // Use a loose limit price to ensure the IOC fills: 5% through the book
+    const bookRes = await fetch(HL_EXEC_INFO, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "l2Book", coin: intent.market }),
+    });
+    let pxStr: string;
+    if (bookRes.ok) {
+        const book: any = await bookRes.json();
+        const levels = book?.levels || [];
+        const refPx = isBuy
+            ? parseFloat(levels[1]?.[0]?.px || levels[0]?.[0]?.px || "0")
+            : parseFloat(levels[0]?.[0]?.px || levels[1]?.[0]?.px || "0");
+        const limitPx = refPx > 0 ? refPx * (isBuy ? 1.05 : 0.95) : 0;
+        pxStr = limitPx.toFixed(2);
+    } else {
+        // Last resort: market-ish via a very loose price is unsafe; bail
+        console.error(`[executor] Could not fetch book for ${intent.market}, skipping close`);
+        return null;
+    }
+
+    console.log(`[executor] Closing ${intent.market}: ${isBuy ? "BUY" : "SELL"} ${closeSz} @ ${pxStr} (IOC, reduce-only)`);
+
+    const wire = orderToWire(
+        {
+            coin: intent.market,
+            is_buy: isBuy,
+            sz: closeSz,
+            limit_px: pxStr,
+            order_type: { limit: { tif: "Ioc" } },
+            reduce_only: true,
+        } as any,
+        asset,
+    );
+    const action = orderWireToAction([wire]);
+    const result: any = await postL1Action(action);
+
+    const statuses = result?.response?.data?.statuses || [];
+    let totalSz = 0;
+    let totalValue = 0;
+    for (const s of statuses) {
+        if (s.filled) {
+            const fSz = parseFloat(s.filled.totalSz);
+            const fPx = parseFloat(s.filled.avgPx);
+            totalSz += fSz;
+            totalValue += fSz * fPx;
+        }
+    }
+
+    if (totalSz === 0) {
+        console.error(`[executor] Close order did not fill:`, JSON.stringify(statuses).slice(0, 300));
+        return null;
+    }
+
+    const avgPx = totalValue / totalSz;
+    const avgPx1e6 = BigInt(Math.round(avgPx * 1e6));
+    console.log(`[executor] Closed ${totalSz} @ avg ${avgPx} (${avgPx1e6})`);
+    return avgPx1e6;
+}
+
+/**
  * Places a resting GTC order on the Hyperliquid testnet. Demo utility:
  * the xyz:CL testnet book is empty, so IOC orders cannot fill during a
  * recording — seed the book first with the solver's own resting orders,
